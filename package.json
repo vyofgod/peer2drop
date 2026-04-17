@@ -1,0 +1,41 @@
+{
+  "name": "peer2drop",
+  "version": "1.0.0",
+  "description": "Secure P2P file transfer with end-to-end encryption and Device ID system",
+  "main": "p2p_transfer.py",
+  "bin": {
+    "peer2drop": "./bin/peer2drop.js"
+  },
+  "scripts": {
+    "start": "node bin/peer2drop.js"
+  },
+  "keywords": [
+    "p2p",
+    "file-transfer",
+    "encryption",
+    "secure",
+    "peer-to-peer"
+  ],
+  "author": "vyofgod",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vyofgod/peer2drop"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "bin/",
+    "p2p_core.py",
+    "p2p_transfer.py",
+    "requirements.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ]
+}
