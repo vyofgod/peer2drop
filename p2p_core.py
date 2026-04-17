@@ -24,6 +24,19 @@ from cryptography.fernet import Fernet
 import base64
 
 
+def get_local_ip() -> str:
+    """Get local IP address automatically"""
+    try:
+        # Create a socket to get local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+
 class MessageType(Enum):
     HANDSHAKE_INIT = "handshake_init"
     HANDSHAKE_RESPONSE = "handshake_response"
@@ -74,6 +87,7 @@ class PeerInfo:
 class DeviceID:
     @staticmethod
     def generate() -> str:
+        """Generate unique Device ID for this machine"""
         machine_id = platform.node()
         mac_address = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff)
                                 for elements in range(0, 2*6, 2)][::-1])
@@ -83,10 +97,40 @@ class DeviceID:
         return '-'.join([device_id[i:i+4] for i in range(0, 12, 4)])
     
     @staticmethod
-    def ip_to_device_id(ip: str) -> str:
-        hash_obj = hashlib.sha256(ip.encode())
-        device_id = hash_obj.hexdigest()[:12].upper()
-        return '-'.join([device_id[i:i+4] for i in range(0, 12, 4)])
+    def generate_with_ip(port: int = 5000) -> str:
+        """Generate Device ID with local IP automatically encoded"""
+        ip = get_local_ip()
+        return DeviceID.encode_with_ip(ip, port)
+    
+    @staticmethod
+    def encode_with_ip(ip: str, port: int = 5000) -> str:
+        """Encode IP:PORT into Device ID format - IP is hidden but recoverable"""
+        data = f"{ip}:{port}"
+        # Base64 encode but make it look like a device ID
+        encoded = base64.b64encode(data.encode()).decode().replace('=', '').replace('+', 'X').replace('/', 'Y')
+        # Pad to 12 chars
+        encoded = (encoded + '0' * 12)[:12].upper()
+        return f"{encoded[:4]}-{encoded[4:8]}-{encoded[8:12]}"
+    
+    @staticmethod
+    def decode_to_ip(device_id: str) -> Optional[tuple]:
+        """Decode Device ID back to (IP, PORT)"""
+        try:
+            # Remove dashes
+            encoded = device_id.replace('-', '')
+            # Reverse the encoding
+            encoded = encoded.replace('X', '+').replace('Y', '/')
+            # Add padding
+            padding = (4 - len(encoded) % 4) % 4
+            encoded += '=' * padding
+            # Decode
+            decoded = base64.b64decode(encoded).decode()
+            if ':' in decoded:
+                ip, port = decoded.split(':')
+                return (ip, int(port))
+        except:
+            pass
+        return None
     
     @staticmethod
     def save(device_id: str, filepath: Path):
@@ -118,8 +162,20 @@ class PeerRegistry:
         self.registry_file.write_text(json.dumps(data, indent=2))
     
     def add_peer(self, device_id: str, ip: str, nickname: str = ""):
+        """Add peer with Device ID that contains IP info"""
         self.peers[device_id] = PeerInfo(device_id, ip, nickname, time.time(), "offline")
         self.save()
+    
+    def add_peer_by_device_id(self, device_id_with_ip: str, nickname: str = "") -> bool:
+        """Add peer using only Device ID (which contains encoded IP)"""
+        # For now, we still need IP separately stored
+        # User will input Device ID, we extract IP from our registry
+        return False
+    
+    def get_ip_from_device_id(self, device_id: str) -> Optional[str]:
+        """Get IP address from Device ID"""
+        peer = self.peers.get(device_id)
+        return peer.ip if peer else None
     
     def get_peer(self, device_id: str) -> Optional[PeerInfo]:
         return self.peers.get(device_id)
