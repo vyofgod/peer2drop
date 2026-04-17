@@ -104,13 +104,14 @@ class DeviceID:
     
     @staticmethod
     def encode_with_ip(ip: str, port: int = 5000) -> str:
-        """Encode IP:PORT into Device ID format - IP is hidden but recoverable"""
+        """Encode IP:PORT into Device ID format"""
         data = f"{ip}:{port}"
-        # Base64 encode but make it look like a device ID
-        encoded = base64.b64encode(data.encode()).decode().replace('=', '').replace('+', 'X').replace('/', 'Y')
-        # Pad to 12 chars
-        encoded = (encoded + '0' * 12)[:12].upper()
-        return f"{encoded[:4]}-{encoded[4:8]}-{encoded[8:12]}"
+        encoded = base64.b64encode(data.encode()).decode()
+        # Make URL-safe
+        encoded = encoded.replace('+', 'X').replace('/', 'Y').replace('=', 'Z')
+        # Pad to 24 chars to ensure full data
+        encoded = (encoded + 'Z' * 24)[:24]
+        return f"{encoded[:6]}-{encoded[6:12]}-{encoded[12:18]}-{encoded[18:24]}"
     
     @staticmethod
     def decode_to_ip(device_id: str) -> Optional[tuple]:
@@ -118,18 +119,25 @@ class DeviceID:
         try:
             # Remove dashes
             encoded = device_id.replace('-', '')
-            # Reverse the encoding
+            
+            # Remove trailing Z padding
+            encoded = encoded.rstrip('Z')
+            
+            # Reverse URL-safe encoding
             encoded = encoded.replace('X', '+').replace('Y', '/')
-            # Add padding
-            padding = (4 - len(encoded) % 4) % 4
-            encoded += '=' * padding
+            
+            # Add proper base64 padding
+            missing_padding = (4 - len(encoded) % 4) % 4
+            encoded += '=' * missing_padding
+            
             # Decode
-            decoded = base64.b64decode(encoded).decode()
+            decoded = base64.b64decode(encoded).decode('utf-8')
+            
             if ':' in decoded:
                 ip, port = decoded.split(':')
                 return (ip, int(port))
-        except:
-            pass
+        except Exception as e:
+            print(f"DEBUG decode error: {e}")
         return None
     
     @staticmethod
@@ -391,16 +399,20 @@ class P2PConnection:
         return data
     
     def _handle_connection(self):
+        print(f"DEBUG: _handle_connection started, is_initiator={self.is_initiator}")
         try:
             if self.is_initiator:
+                print(f"DEBUG: Initiating handshake...")
                 self._initiate_handshake()
             while self.running:
                 message = self._receive_message()
                 if not message:
+                    print(f"DEBUG: No message received, breaking")
                     break
+                print(f"DEBUG: Received message type: {message.get('type')}")
                 self._process_message(message)
-        except:
-            pass
+        except Exception as e:
+            print(f"DEBUG: Exception in _handle_connection: {e}")
         finally:
             self.stop()
     
@@ -450,15 +462,20 @@ class P2PConnection:
     
     def _handle_auth_request(self, data: Dict):
         peer_id = data['device_id']
+        print(f"DEBUG: Auth request from {peer_id}")
         if self.on_auth_request:
             authorized = self.on_auth_request(peer_id)
+            print(f"DEBUG: Auth decision: {authorized}")
             self._send_message(MessageType.AUTH_RESPONSE, {'authorized': authorized})
             if authorized:
                 self.authenticated = True
+                print(f"DEBUG: Authenticated {peer_id}")
     
     def _handle_auth_response(self, data: Dict):
+        print(f"DEBUG: Auth response received: {data}")
         if data['authorized']:
             self.authenticated = True
+            print(f"DEBUG: We are authenticated!")
             if self.on_message:
                 self.on_message(f"Connected")
     
@@ -538,7 +555,12 @@ class P2PServer:
     def start(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind(('0.0.0.0', self.port))
+        try:
+            self.server_socket.bind(('0.0.0.0', self.port))
+        except OSError:
+            # Port in use, try next port
+            self.port += 1
+            self.server_socket.bind(('0.0.0.0', self.port))
         self.server_socket.listen(5)
         self.running = True
         threading.Thread(target=self._accept_connections, daemon=True).start()

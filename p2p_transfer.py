@@ -56,33 +56,42 @@ class P2PMainWindow(QMainWindow):
         self.config_dir = Path.home() / '.p2p_transfer'
         self.config_dir.mkdir(exist_ok=True)
         
-        # Generate Device ID with IP automatically
-        self.device_id_file = self.config_dir / 'device_id.txt'
-        self.shareable_device_id_file = self.config_dir / 'shareable_device_id.txt'
+        # Start server first to get actual port
+        self.crypto = CryptoManager()
+        self.shared_dir = self.config_dir / 'shared'
+        self.file_manager = FileManager(self.shared_dir)
         
-        # Load or generate shareable Device ID (with IP encoded)
-        self.shareable_device_id = DeviceID.load(self.shareable_device_id_file)
-        if not self.shareable_device_id:
-            self.shareable_device_id = DeviceID.generate_with_ip()
-            DeviceID.save(self.shareable_device_id, self.shareable_device_id_file)
+        # Try to start server on port 5000, if busy use 5001, 5002, etc.
+        self.server_port = 5000
+        temp_device_id = DeviceID.generate()
+        self.server = P2PServer(temp_device_id, self.crypto, self.file_manager, self.server_port)
         
-        # Use shareable ID as main device ID
+        # Set callback BEFORE starting server
+        self.server.on_connection = self.handle_new_connection
+        
+        self.server.start()
+        self.server_port = self.server.port  # Get actual port used
+        
+        # ALWAYS generate fresh Device ID with actual port (don't cache)
+        from p2p_core import get_local_ip
+        local_ip = get_local_ip()
+        self.shareable_device_id = DeviceID.encode_with_ip(local_ip, self.server_port)
         self.device_id = self.shareable_device_id
         
-        self.shared_dir = self.config_dir / 'shared'
+        print(f"Generated Device ID: {self.device_id} for port {self.server_port}")
+        
+        # Update server with correct device ID
+        self.server.device_id = self.device_id
+        
         self.downloads_dir = self.config_dir / 'downloads'
         self.downloads_dir.mkdir(exist_ok=True)
         
         self.registry_file = self.config_dir / 'peers.json'
         self.peer_registry = PeerRegistry(self.registry_file)
         
-        self.crypto = CryptoManager()
-        self.file_manager = FileManager(self.shared_dir)
-        self.server = P2PServer(self.device_id, self.crypto, self.file_manager)
         self.connections: List[P2PConnection] = []
         
         self.init_ui()
-        self.start_server()
         
         # Update timer
         self.timer = QTimer()
@@ -343,12 +352,12 @@ class P2PMainWindow(QMainWindow):
         total_size = sum(f.size for f in self.file_manager.shared_files) / (1024*1024)
         fingerprint = self.crypto.get_key_fingerprint()
         
-        # Device ID bar
-        device_info = f"Device ID: {self.device_id}  |  Key Fingerprint: {fingerprint}"
+        # Device ID bar - show port to differentiate instances
+        device_info = f"Device ID: {self.device_id}  |  Port: {self.server_port}  |  Key: {fingerprint}"
         self.device_label.setText(device_info)
         
         # Status bar
-        status = f"Server:5000 | Peers:{active_conns} | Files:{files_count} ({total_size:.1f}MB) | Encryption:AES-256"
+        status = f"Server:{self.server_port} | Peers:{active_conns} | Files:{files_count} ({total_size:.1f}MB) | Encryption:AES-256"
         self.status_bar.showMessage(status)
     
     def refresh_files(self):
@@ -479,14 +488,38 @@ class P2PMainWindow(QMainWindow):
             peers = self.peer_registry.get_all_peers()
             if row < len(peers):
                 peer = peers[row]
-                connection = P2PClient.connect(peer.ip, 5000, self.device_id, self.file_manager)
-                if connection:
-                    connection.on_auth_request = lambda peer_id: True
-                    connection.on_message = lambda msg: None
-                    connection.on_transfer_progress = lambda stats: self.signals.update_transfers.emit()
-                    self.connections.append(connection)
-                    self.peer_registry.update_status(peer.device_id, "online")
-                    self.refresh_peers()
+                
+                # Decode Device ID to get actual IP and PORT
+                ip_port = DeviceID.decode_to_ip(peer.device_id)
+                if ip_port:
+                    ip, port = ip_port
+                    print(f"Connecting to {peer.device_id} at {ip}:{port}")
+                    connection = P2PClient.connect(ip, port, self.device_id, self.file_manager)
+                    if connection:
+                        connection.on_auth_request = lambda peer_id: True
+                        connection.on_message = lambda msg: None
+                        connection.on_transfer_progress = lambda stats: self.signals.update_transfers.emit()
+                        self.connections.append(connection)
+                        
+                        # Wait a bit for authentication
+                        QTimer.singleShot(500, lambda: self.check_connection_status(peer.device_id))
+                        
+                        print(f"Connected to {peer.device_id}")
+                    else:
+                        print(f"Failed to connect to {peer.device_id}")
+                else:
+                    print(f"Failed to decode Device ID: {peer.device_id}")
+    
+    def check_connection_status(self, device_id):
+        """Check if connection is authenticated and update status"""
+        for conn in self.connections:
+            if conn.peer_device_id == device_id and conn.authenticated:
+                self.peer_registry.update_status(device_id, "online")
+                self.refresh_peers()
+                print(f"Authentication confirmed for {device_id}")
+                return
+        # Not authenticated yet, check again
+        QTimer.singleShot(500, lambda: self.check_connection_status(device_id))
     
     def disconnect_peer(self):
         row = self.peers_table.currentRow()
@@ -769,10 +802,16 @@ Type: {Path(file.name).suffix or 'No extension'}
                 self.refresh_peers()
     
     def upload_all(self):
+        print(f"Upload All clicked! Connections: {len(self.connections)}")
         for conn in self.connections:
+            print(f"Connection authenticated: {conn.authenticated}")
             if conn.authenticated:
+                print(f"Sending {len(self.file_manager.shared_files)} files")
                 for file in self.file_manager.shared_files:
+                    print(f"Sending file: {file.name}")
                     threading.Thread(target=conn.send_file, args=(file,), daemon=True).start()
+            else:
+                print("Connection not authenticated yet!")
     
     def request_files(self):
         for conn in self.connections:
