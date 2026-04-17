@@ -1,0 +1,4 @@
+cryptography==41.0.7
+psutil==5.9.6
+PyQt6==6.6.1
+pyperclip==1.8.2
