@@ -56,11 +56,18 @@ class P2PMainWindow(QMainWindow):
         self.config_dir = Path.home() / '.p2p_transfer'
         self.config_dir.mkdir(exist_ok=True)
         
+        # Generate Device ID with IP automatically
         self.device_id_file = self.config_dir / 'device_id.txt'
-        self.device_id = DeviceID.load(self.device_id_file)
-        if not self.device_id:
-            self.device_id = DeviceID.generate()
-            DeviceID.save(self.device_id, self.device_id_file)
+        self.shareable_device_id_file = self.config_dir / 'shareable_device_id.txt'
+        
+        # Load or generate shareable Device ID (with IP encoded)
+        self.shareable_device_id = DeviceID.load(self.shareable_device_id_file)
+        if not self.shareable_device_id:
+            self.shareable_device_id = DeviceID.generate_with_ip()
+            DeviceID.save(self.shareable_device_id, self.shareable_device_id_file)
+        
+        # Use shareable ID as main device ID
+        self.device_id = self.shareable_device_id
         
         self.shared_dir = self.config_dir / 'shared'
         self.downloads_dir = self.config_dir / 'downloads'
@@ -241,21 +248,15 @@ class P2PMainWindow(QMainWindow):
         peers_layout.setContentsMargins(15, 15, 15, 15)
         peers_layout.setSpacing(10)
         
-        # Share ID section
-        share_layout = QHBoxLayout()
-        share_label = QLabel("Share your Device ID with peers:")
-        share_layout.addWidget(share_label)
-        
-        share_id_btn = QPushButton("Generate Shareable ID")
-        share_id_btn.clicked.connect(self.generate_shareable_id)
-        share_layout.addWidget(share_id_btn)
-        share_layout.addStretch()
-        peers_layout.addLayout(share_layout)
+        # Info label
+        info_label = QLabel("Your Device ID is shown at the top. Share it with peers to connect.")
+        info_label.setStyleSheet("color: #666666; padding: 5px;")
+        peers_layout.addWidget(info_label)
         
         # Add peer section
         peer_controls = QHBoxLayout()
         self.peer_input = QLineEdit()
-        self.peer_input.setPlaceholderText("Enter Device ID or IP:PORT")
+        self.peer_input.setPlaceholderText("Paste Device ID here")
         self.peer_input.returnPressed.connect(self.add_peer)
         peer_controls.addWidget(self.peer_input)
         
@@ -433,14 +434,22 @@ class P2PMainWindow(QMainWindow):
         """Add peer by Device ID (which contains IP info) or IP:PORT"""
         value = self.peer_input.text().strip()
         
+        if not value:
+            return
+        
+        print(f"DEBUG: Trying to add peer: {value}")
+        
         # Try to decode as Device ID first
         ip_port = DeviceID.decode_to_ip(value)
+        print(f"DEBUG: Decoded IP:PORT = {ip_port}")
+        
         if ip_port:
             ip, port = ip_port
+            print(f"DEBUG: Adding peer with IP={ip}, PORT={port}")
             self.peer_registry.add_peer(value, ip)
             self.refresh_peers()
             self.peer_input.clear()
-            QMessageBox.information(self, "Peer Added", f"Peer added!\nDevice ID: {value}")
+            QMessageBox.information(self, "Success", f"Peer added!\nDevice ID: {value}\nIP: {ip}:{port}")
             return
         
         # Check if it's IP:PORT format (fallback)
@@ -448,47 +457,20 @@ class P2PMainWindow(QMainWindow):
             try:
                 ip, port = value.split(':')
                 device_id = DeviceID.encode_with_ip(ip, int(port))
+                print(f"DEBUG: Created Device ID from IP: {device_id}")
                 self.peer_registry.add_peer(device_id, ip)
                 self.refresh_peers()
                 self.peer_input.clear()
-                QMessageBox.information(self, "Peer Added", f"Peer added with Device ID:\n{device_id}")
-            except:
-                QMessageBox.warning(self, "Error", "Invalid IP:PORT format")
+                QMessageBox.information(self, "Success", f"Peer added!\nDevice ID: {device_id}")
+            except Exception as e:
+                print(f"DEBUG: Error with IP:PORT - {e}")
+                QMessageBox.warning(self, "Error", f"Invalid IP:PORT format\n{e}")
         else:
-            QMessageBox.warning(self, "Error", "Enter Device ID or IP:PORT (e.g., 192.168.1.50:5000)")
+            print(f"DEBUG: Invalid format")
+            QMessageBox.warning(self, "Error", "Invalid Device ID format\nTry generating a new ID or use IP:PORT")
     
     
-    def generate_shareable_id(self):
-        """Generate a shareable Device ID with IP automatically detected"""
-        try:
-            # Get local IP automatically
-            from p2p_core import get_local_ip
-            ip = get_local_ip()
-            port = 5000
-            device_id = DeviceID.encode_with_ip(ip, port)
-            
-            # Show dialog with shareable ID
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Your Shareable Device ID")
-            msg.setText(f"Share this Device ID with your peers:\n\n{device_id}\n\n"
-                       f"They can add you using this ID.\n"
-                       f"Your IP is automatically detected and hidden in the ID.")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            
-            # Add copy button
-            copy_btn = msg.addButton("Copy ID", QMessageBox.ButtonRole.ActionRole)
-            msg.exec()
-            
-            if msg.clickedButton() == copy_btn:
-                try:
-                    import pyperclip
-                    pyperclip.copy(device_id)
-                    QMessageBox.information(self, "Copied", "Device ID copied to clipboard!")
-                except:
-                    pass
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to generate ID: {e}")
-    
+
     
     
     def connect_peer(self):
