@@ -15,6 +15,15 @@ import time
 from p2p_core import *
 
 
+def main():
+    """Entry point for the application"""
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    window = P2PMainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
 class UpdateSignals(QObject):
     update_status = pyqtSignal()
     update_files = pyqtSignal()

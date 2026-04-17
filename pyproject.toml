@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "peer2drop"
+version = "1.0.0"
+description = "Secure P2P file transfer with end-to-end encryption and Device ID system"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "vyofgod", email = "vyofgod@users.noreply.github.com"}
+]
+keywords = ["p2p", "file-transfer", "encryption", "secure", "peer-to-peer"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: Security :: Cryptography",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "cryptography>=41.0.0",
+    "psutil>=5.9.0",
+    "PyQt6>=6.6.0",
+    "pyperclip>=1.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/vyofgod/peer2drop"
+Repository = "https://github.com/vyofgod/peer2drop"
+Issues = "https://github.com/vyofgod/peer2drop/issues"
+
+[project.scripts]
+peer2drop = "peer2drop:main"
+
+[tool.setuptools]
+py-modules = ["p2p_core", "p2p_transfer", "peer2drop"]
+
+[tool.setuptools.packages.find]
+where = ["."]
